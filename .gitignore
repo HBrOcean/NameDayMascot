@@ -1,0 +1,41 @@
+# ---- .NET / Avalonia build outputs ----
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+publish/
+artifacts/
+*.dll
+*.exe
+*.pdb
+*.deps.json
+*.runtimeconfig.json
+
+# ---- Local NuGet ----
+packages/
+*.nupkg
+nuget.exe
+
+# ---- IDE ----
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userprefs
+*.DotSettings.user
+*.sln.docstates
+
+# ---- OS ----
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---- Logs / temp ----
+*.log
+log.txt
+
+# ---- 保留模型与图标资源（Assets/ 下的 .atlas/.skel/.png/.ico 必须提交）----
+!Assets/**
