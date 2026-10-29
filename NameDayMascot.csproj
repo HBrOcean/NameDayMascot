@@ -15,6 +15,8 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>Assets\icons\app.ico</ApplicationIcon>
+    <!-- 单文件发布时把 SharpHook 的 uiohook.dll 一并打进 exe，否则运行时找不到原生库 -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <NoWarn>$(NoWarn);CA1416;CS0649;SKEXP0000</NoWarn>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>

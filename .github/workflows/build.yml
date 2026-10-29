@@ -1,0 +1,51 @@
+name: build
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # 自动定位 .csproj，不管项目在仓库根还是子目录都能跑
+      - name: Locate project
+        shell: pwsh
+        run: |
+          $proj = Get-ChildItem -Recurse -Filter *.csproj |
+                  Where-Object { $_.FullName -notmatch '\\obj\\' -and $_.FullName -notmatch '\\bin\\' } |
+                  Select-Object -First 1
+          if (-not $proj) { throw "No .csproj found in repository" }
+          "PROJ=$($proj.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Project: $($proj.FullName)"
+
+      - name: Restore
+        run: dotnet restore "$env:PROJ"
+
+      - name: Build
+        run: dotnet build "$env:PROJ" -c Release --no-restore
+
+      - name: Publish (win-x64, self-contained, single file)
+        run: >
+          dotnet publish "$env:PROJ" -c Release -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o out
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NameDayMascot-win-x64
+          path: out/
+          if-no-files-found: error

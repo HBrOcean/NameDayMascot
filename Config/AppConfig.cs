@@ -48,7 +48,7 @@ public sealed class AppConfig
     };
 
     // —— 动作 ——
-    public string IdleAnimation { get; set; } = "";   // 待机（空=运行时取第一个）
+    public string IdleAnimation { get; set; } = "idle";   // 待机（默认 idle，不存在时回退第一个）
     public string ClickAnimation { get; set; } = "";  // 点击动作（空=自动挑一个）
 
     // —— 行为 ——

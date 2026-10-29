@@ -273,8 +273,14 @@ public class PetWindow : Window
 
     private string PickIdle()
     {
+        // 1) 配置指定且该动画存在 → 用配置的
         if (!string.IsNullOrEmpty(_config.IdleAnimation) && _model.HasAnimation(_config.IdleAnimation))
             return _config.IdleAnimation;
+
+        // 2) 未指定（老配置里是空字符串）→ 优先 idle
+        if (_model.HasAnimation("idle")) return "idle";
+
+        // 3) 实在没有 → 退回第一个动画
         var all = _model.AnimationNames;
         return all.Count > 0 ? all[0] : "";
     }
