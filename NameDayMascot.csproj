@@ -26,7 +26,11 @@
 
     <!-- 单文件发布时把 SharpHook 的 uiohook.dll 一并打进 exe，否则运行时找不到原生库 -->
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <NoWarn>$(NoWarn);CA1416;CS0649;SKEXP0000</NoWarn>
+    <!-- CA1416: 平台兼容告警（穿透等本就是 Windows 专用）
+         CS0649: 未赋值字段
+         SKEXP0000: SkiaSharp 预览 API
+         CS8625: Spine/ 目录下第三方源码的 nullable 告警，不是我们的代码 -->
+    <NoWarn>$(NoWarn);CA1416;CS0649;SKEXP0000;CS8625</NoWarn>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
 
@@ -53,6 +57,14 @@
     <Content Include="Assets\icons\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+  </ItemGroup>
+
+  <!-- Spine/ 是第三方源码（spine-csharp 4.2），原本不是为 nullable 写的。
+       整个目录关掉可空性分析，否则会产生上百条 CS86xx 警告。 -->
+  <ItemGroup>
+    <Compile Update="Spine\**\*.cs">
+      <Nullable>disable</Nullable>
+    </Compile>
   </ItemGroup>
 
 </Project>

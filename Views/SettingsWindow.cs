@@ -11,8 +11,15 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Media.Transformation;   // TransformOperations
+using Avalonia.Styling;                // Style / Setter / Selector
 using NameDayMascot.Config;
 using NameDayMascot.Services;
+
+// Avalonia.Input 里也有一个 KeyBinding（XAML 手势绑定用），
+// 而下面用 Avalonia.Input 只是为了 Cursor / StandardCursorType。
+// 不指定别名的话，所有 KeyBinding 都会报 CS0104「不明确的引用」。
+using KeyBinding = NameDayMascot.Config.KeyBinding;
 
 namespace NameDayMascot.Views;
 

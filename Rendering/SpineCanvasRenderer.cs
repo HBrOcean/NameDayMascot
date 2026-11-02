@@ -9,7 +9,7 @@ namespace NameDayMascot.Rendering;
 /// 把 Spine 骨架绘制到 SkiaSharp 画布。spine-csharp 没有官方 Skia 后端，
 /// 这里按其数据结构（RegionAttachment / MeshAttachment / ClippingAttachment）自绘三角网格。
 /// </summary>
-public sealed class SpineCanvasRenderer
+public sealed class SpineCanvasRenderer : IDisposable
 {
     private readonly SkeletonClipping _clipper = new();
 
