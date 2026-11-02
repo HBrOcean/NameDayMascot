@@ -20,6 +20,11 @@ public sealed class SkeletonModel : IDisposable
 
     // 图集页 → SKImage
     private readonly Dictionary<AtlasPage, SKImage> _images = new();
+
+    // 动画名缓存：这个属性被 UI 高频访问（设置面板每个按键行都会取一次），
+    // 原来每次访问都 new 一个 List，纯浪费。
+    private readonly List<string> _animationNames = new();
+
     private bool _disposed;
 
     /// <summary>模型自然包围盒（Spine 本地坐标，未缩放），用于确定绘制基准。</summary>
@@ -40,6 +45,8 @@ public sealed class SkeletonModel : IDisposable
         var stateData = new AnimationStateData(Data) { DefaultMix = defaultMix };
         State = new AnimationState(stateData);
 
+        foreach (var a in Data.Animations) _animationNames.Add(a.Name);
+
         Bounds = ComputeBounds();
     }
 
@@ -59,16 +66,8 @@ public sealed class SkeletonModel : IDisposable
     public float PageHeight(TextureRegion region) =>
         (region is AtlasRegion ar && ar.page != null) ? ar.page.height : region.height;
 
-    /// <summary>动画名列表（用于设置面板下拉）。</summary>
-    public IReadOnlyList<string> AnimationNames
-    {
-        get
-        {
-            var list = new List<string>();
-            foreach (var a in Data.Animations) list.Add(a.Name);
-            return list;
-        }
-    }
+    /// <summary>动画名列表（用于设置面板下拉）。构造时算好，之后只读。</summary>
+    public IReadOnlyList<string> AnimationNames => _animationNames;
 
     public bool HasAnimation(string name) => Data.FindAnimation(name) != null;
 
@@ -105,32 +104,39 @@ public sealed class SkeletonModel : IDisposable
 
     private (float, float, float, float) ComputeBounds()
     {
-        // 采样首个动画若干帧，取最大包围盒；否则退回 setup pose。
-        float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
-        void Accumulate()
+        // 逐帧采样，每帧记一个包围盒，最后做统计而不是简单取全局 min/max。
+        //
+        // 为什么：部分 Spine 模型里 born / posture 这类动画会把骨架整体位移到很远
+        // （实测有模型跑到 x≈-999）。直接对所有帧取绝对 min/max，包围盒会被撑成
+        // 1200+ 宽，渲染时按框缩放，桌宠就变成一小只还偏在一边。
+        var frames = new List<(float X0, float Y0, float X1, float Y1)>();
+
+        void SampleFrame()
         {
             Skeleton.UpdateWorldTransform(Skeleton.Physics.None);
-            var arr = new float[8];
+
+            float fx0 = float.MaxValue, fy0 = float.MaxValue;
+            float fx1 = float.MinValue, fy1 = float.MinValue;
+
             foreach (var slot in Skeleton.DrawOrder)
             {
-                var att = slot.Attachment;
-                if (att is VertexAttachment va && va.WorldVerticesLength >= 2)
+                if (slot.Attachment is not VertexAttachment va || va.WorldVerticesLength < 2) continue;
+
+                var verts = new float[va.WorldVerticesLength];
+                va.ComputeWorldVertices(slot, verts);
+                for (int i = 0; i + 1 < verts.Length; i += 2)
                 {
-                    var verts = new float[va.WorldVerticesLength];
-                    va.ComputeWorldVertices(slot, verts);
-                    for (int i = 0; i + 1 < verts.Length; i += 2)
-                    {
-                        if (verts[i] < minX) minX = verts[i];
-                        if (verts[i] > maxX) maxX = verts[i];
-                        if (verts[i + 1] < minY) minY = verts[i + 1];
-                        if (verts[i + 1] > maxY) maxY = verts[i + 1];
-                    }
+                    if (verts[i] < fx0) fx0 = verts[i];
+                    if (verts[i] > fx1) fx1 = verts[i];
+                    if (verts[i + 1] < fy0) fy0 = verts[i + 1];
+                    if (verts[i + 1] > fy1) fy1 = verts[i + 1];
                 }
             }
+
+            if (fx0 <= fx1 && fy0 <= fy1) frames.Add((fx0, fy0, fx1, fy1));
         }
 
         // 遍历「所有」动画采样：只取首个动画会让其它动作摆幅更大时被窗口裁切
-        bool sampled = false;
         foreach (var anim in Data.Animations)
         {
             float dur = anim.Duration <= 0 ? 0.1f : anim.Duration;
@@ -138,18 +144,72 @@ public sealed class SkeletonModel : IDisposable
             for (int i = 0; i <= steps; i++)
             {
                 anim.Apply(Skeleton, 0f, dur * i / steps, false, null, 1f, MixBlend.Setup, MixDirection.In);
-                Accumulate();
-                sampled = true;
+                SampleFrame();
             }
         }
-        if (!sampled) Accumulate();
 
+        // 恢复干净状态交给调用方
         Skeleton.SetToSetupPose();
         State.Apply(Skeleton);
         Skeleton.UpdateWorldTransform(Skeleton.Physics.None);
 
-        if (minX > maxX) return (-100, -100, 100, 100);
-        return (minX, minY, maxX, maxY);
+        // 一个动画都没有 → 用 setup pose 自己当包围盒
+        if (frames.Count == 0) SampleFrame();
+        if (frames.Count == 0) return (-100, -100, 100, 100);
+
+        // 绝对框
+        float x0 = float.MaxValue, y0 = float.MaxValue, x1 = float.MinValue, y1 = float.MinValue;
+        foreach (var f in frames)
+        {
+            if (f.X0 < x0) x0 = f.X0;
+            if (f.Y0 < y0) y0 = f.Y0;
+            if (f.X1 > x1) x1 = f.X1;
+            if (f.Y1 > y1) y1 = f.Y1;
+        }
+
+        // 分位框：砍掉最极端的各 10% 帧
+        var q = QuantileBox(frames);
+
+        // 只有绝对框被少数极端帧撑大到 1.6 倍以上，才改用它。
+        // 正常模型两者几乎一致 —— 此时保留精确包围盒，不会白裁一条边。
+        float aw = Math.Max(1e-3f, x1 - x0), ah = Math.Max(1e-3f, y1 - y0);
+        float qw = Math.Max(1e-3f, q.X1 - q.X0), qh = Math.Max(1e-3f, q.Y1 - q.Y0);
+
+        if (aw > qw * 1.6f || ah > qh * 1.6f)
+        {
+            Logger.Log($"[Bounds] 检测到极端位移帧，改用分位包围盒 {qw:0}x{qh:0}（绝对框 {aw:0}x{ah:0}）");
+            return q;
+        }
+
+        return (x0, y0, x1, y1);
+    }
+
+    /// <summary>取四边各的 10% / 90% 分位，排除大幅位移的异常帧。</summary>
+    private static (float X0, float Y0, float X1, float Y1) QuantileBox(
+        List<(float X0, float Y0, float X1, float Y1)> frames)
+    {
+        static float Pick(List<float> values, float p)
+        {
+            if (values.Count == 0) return 0f;
+            values.Sort();
+            int i = (int)Math.Round((values.Count - 1) * p, MidpointRounding.AwayFromZero);
+            return values[Math.Clamp(i, 0, values.Count - 1)];
+        }
+
+        var left = new List<float>(frames.Count);
+        var top = new List<float>(frames.Count);
+        var right = new List<float>(frames.Count);
+        var bottom = new List<float>(frames.Count);
+
+        foreach (var f in frames)
+        {
+            left.Add(f.X0);
+            top.Add(f.Y0);
+            right.Add(f.X1);
+            bottom.Add(f.Y1);
+        }
+
+        return (Pick(left, 0.10f), Pick(top, 0.10f), Pick(right, 0.90f), Pick(bottom, 0.90f));
     }
 
     public void Dispose()

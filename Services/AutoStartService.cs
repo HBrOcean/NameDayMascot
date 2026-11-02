@@ -74,7 +74,7 @@ public static class AutoStartService
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine("[AutoStart] failed: " + ex.Message);
+            Logger.Error("[AutoStart] 设置开机自启失败", ex);
         }
     }
 

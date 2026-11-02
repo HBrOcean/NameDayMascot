@@ -15,10 +15,25 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>Assets\icons\app.ico</ApplicationIcon>
+
+    <!-- 关键：必须作为「应用清单」嵌入 exe，否则 PerMonitorV2 高 DPI 感知不生效，
+         125%/150% 缩放屏上整个窗口会被系统按位图拉伸，角色发糊。
+         光把 app.manifest 复制到输出目录是没用的。 -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <!-- 只保留中文资源卫星程序集，省掉一堆用不到的本地化 dll -->
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+
     <!-- 单文件发布时把 SharpHook 的 uiohook.dll 一并打进 exe，否则运行时找不到原生库 -->
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <NoWarn>$(NoWarn);CA1416;CS0649;SKEXP0000</NoWarn>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <!-- Release 不生成调试符号：publish 出来的目录更干净 -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
   <ItemGroup>
@@ -38,9 +53,6 @@
     <Content Include="Assets\icons\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <None Update="app.manifest">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
   </ItemGroup>
 
 </Project>

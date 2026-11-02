@@ -52,8 +52,31 @@ public sealed class KeyHookService : IDisposable
     /// </summary>
     public volatile bool FilterPlainKeys = false;
 
+    // 按住不放时系统会持续发 keydown（典型 30~50ms 一次）。
+    // 不过滤的话「按住 Ctrl+1」= 每 30ms 请求一次动作，全靠动作锁定硬扛，
+    // 表现就是松手后角色还在不停原地抽动。
+    private const int RepeatWindowMs = 120;
+    private readonly object _repeatLock = new();
+    private string _lastKey = "";
+    private long _lastTick;
+
+    /// <summary>
+    /// 修饰键自身的 keydown 没有意义（每次按 Ctrl 都会来一条），
+    /// 而且会挤掉"上一次按键"的记录。SharpHook 的枚举名形如 VcLeftCtrl / VcRightShift /
+    /// VcLeftMeta，不同版本里 Ctrl 可能写作 Ctrl 或 Control，所以用子串而不是精确匹配。
+    /// </summary>
+    private static bool IsModifierKey(string key)
+        => key.Contains("Ctrl", StringComparison.Ordinal)
+        || key.Contains("Shift", StringComparison.Ordinal)
+        || key.Contains("Alt", StringComparison.Ordinal)
+        || key.Contains("Meta", StringComparison.Ordinal);
+
     private void OnKeyPressed(object? sender, KeyboardHookEventArgs e)
     {
+        string key = e.Data.KeyCode.ToString();
+
+        if (IsModifierKey(key)) return;
+
         var mask = e.RawEvent.Mask;
         bool ctrl = (mask & EventMask.Ctrl) != 0;
         bool alt = (mask & EventMask.Alt) != 0;
@@ -61,8 +84,15 @@ public sealed class KeyHookService : IDisposable
 
         if (FilterPlainKeys && !ctrl && !alt && !shift) return;
 
-        // 值先取出，避免在 lambda 里跨线程访问事件对象
-        string key = e.Data.KeyCode.ToString();
+        // 自动重复过滤：同一个键在窗口期内的后续 keydown 视为"还按着没松"
+        long now = Environment.TickCount64;
+        lock (_repeatLock)
+        {
+            if (key == _lastKey && now - _lastTick < RepeatWindowMs) return;
+            _lastKey = key;
+            _lastTick = now;
+        }
+
         var ke = new KeyEvent(key, ctrl, alt, shift);
 
         Dispatcher.UIThread.Post(() =>

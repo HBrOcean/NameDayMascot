@@ -11,11 +11,19 @@ public static class Diagnostics
 {
     public static void Dump()
     {
-        string dir = Path.Combine(AppContext.BaseDirectory, "Assets", "characters", "311801");
+        // 不写死 311801：取第一套扫描到的可用皮肤
+        var first = NameDayMascot.Services.SkinCatalog.All.FirstOrDefault(e => e.IsUsable);
+        string? dir = first?.Dir;
+        if (dir == null || first == null)
+        {
+            Console.WriteLine("[Dump] 没有可用的皮肤，先确认 Assets/characters 下有 .atlas/.skel");
+            return;
+        }
+        string id = first.Id;
         Console.WriteLine("[Dump] atlas 目录: " + dir);
         var model = new SkeletonModel(
-            Path.Combine(dir, "311801.atlas"),
-            Path.Combine(dir, "311801.skel"));
+            Path.Combine(dir, id + ".atlas"),
+            Path.Combine(dir, id + ".skel"));
 
         Console.WriteLine("[Dump] 动画: " + string.Join(", ", model.AnimationNames));
         var b = model.Bounds;

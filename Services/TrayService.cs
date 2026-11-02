@@ -18,7 +18,10 @@ public sealed class TrayService : IDisposable
         Action onToggleWindow,
         Action onQuit,
         IReadOnlyList<string> actionNames,
-        Action<string> onPlayAction)
+        Action<string> onPlayAction,
+        IReadOnlyList<SkinEntry> skins,
+        string currentSkinId,
+        Action<string> onSwitchSkin)
     {
         _tray = new TrayIcon
         {
@@ -31,6 +34,34 @@ public sealed class TrayService : IDisposable
         var miShow = new NativeMenuItem("显示 / 隐藏桌宠");
         miShow.Command = new RelayCommand(onToggleWindow);
         menu.Add(miShow);
+
+        // 皮肤子菜单：换皮肤不该只能进设置面板翻页签
+        if (skins.Count > 0)
+        {
+            var miSkin = new NativeMenuItem("皮肤");
+            var sub = new NativeMenu();
+            foreach (var s in skins)
+            {
+                var it = new NativeMenuItem(s.IsUsable ? s.DisplayName : s.DisplayName + "（资源缺失）")
+                {
+                    ToggleType = NativeMenuItemToggleType.Radio,
+                    IsChecked = string.Equals(s.Id, currentSkinId, StringComparison.OrdinalIgnoreCase),
+                };
+                if (!s.IsUsable)
+                {
+                    // 缺资源的皮肤点了也加载不了，直接置灰
+                    it.IsEnabled = false;
+                }
+                else
+                {
+                    string captured = s.Id;
+                    it.Command = new RelayCommand(() => onSwitchSkin(captured));
+                }
+                sub.Add(it);
+            }
+            miSkin.Menu = sub;
+            menu.Add(miSkin);
+        }
 
         // 快速动作子菜单
         if (actionNames.Count > 0)

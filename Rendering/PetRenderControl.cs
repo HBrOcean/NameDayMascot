@@ -39,6 +39,12 @@ public sealed class PetRenderControl : Control, IDisposable
     /// <summary>是否允许渲染循环运行（窗口隐藏时应置 false，避免空跑）。</summary>
     public bool Running { get; set; } = true;
 
+    /// <summary>上下浮动（轻微正弦漂浮，像在呼吸）。</summary>
+    public bool Bobbing { get; set; }
+
+    /// <summary>水平翻转（左右镜像）。</summary>
+    public bool Flip { get; set; }
+
     public SkeletonModel Model => _model;
 
     public PetRenderControl(SkeletonModel model)
@@ -103,7 +109,12 @@ public sealed class PetRenderControl : Control, IDisposable
         float cy = (b.MinY + b.MaxY) / 2f;
 
         canvas.Save();
-        canvas.Translate(pw / 2f, ph / 2f);
+
+        // 上下浮动：屏幕空间的正弦偏移（物理像素），与模型缩放无关
+        float bobPx = Bobbing
+            ? (float)Math.Sin(_clock.Elapsed.TotalSeconds * 1.8) * 5f * (float)_cachedScaling
+            : 0f;
+        canvas.Translate(pw / 2f, ph / 2f + bobPx);
 
         // 按「控件能容纳的最大比例」绘制：即使某帧摆幅超出静态包围盒，
         // 结果只是整体略缩，而不会被窗口边缘裁掉。
@@ -111,7 +122,8 @@ public sealed class PetRenderControl : Control, IDisposable
         float bh = Math.Max(1e-3f, b.MaxY - b.MinY);
         float s = Math.Min(pw / bw, ph / bh);
 
-        canvas.Scale(s, -s);
+        // 水平翻转：X 方向取负
+        canvas.Scale(Flip ? -s : s, -s);
         canvas.Translate(-cx, -cy);
         _renderer.Draw(canvas, _model.Skeleton, _model);
         canvas.Restore();
