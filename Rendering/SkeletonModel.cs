@@ -136,11 +136,14 @@ public sealed class SkeletonModel : IDisposable
             if (fx0 <= fx1 && fy0 <= fy1) frames.Add((fx0, fy0, fx1, fy1));
         }
 
-        // 遍历「所有」动画采样：只取首个动画会让其它动作摆幅更大时被窗口裁切
+        // 遍历「所有」动画采样。
+        //
+        // 每动画 49 帧（原来只有 13 帧）：采样太稀会让快速摆动的极值落在两个采样点
+        // 之间，静态包围盒就会偏小，运行时表现为"渲染超出窗口"。
         foreach (var anim in Data.Animations)
         {
             float dur = anim.Duration <= 0 ? 0.1f : anim.Duration;
-            const int steps = 12;
+            const int steps = 48;
             for (int i = 0; i <= steps; i++)
             {
                 anim.Apply(Skeleton, 0f, dur * i / steps, false, null, 1f, MixBlend.Setup, MixDirection.In);
@@ -170,18 +173,50 @@ public sealed class SkeletonModel : IDisposable
         // 分位框：砍掉最极端的各 10% 帧
         var q = QuantileBox(frames);
 
-        // 只有绝对框被少数极端帧撑大到 1.6 倍以上，才改用它。
-        // 正常模型两者几乎一致 —— 此时保留精确包围盒，不会白裁一条边。
+        // 只有绝对框被少数极端帧撑大到 2.2 倍以上，才改用它。
+        // 阈值定得比较高：宁可包围盒偏大（角色略小），也不要因为误判而裁掉动作。
         float aw = Math.Max(1e-3f, x1 - x0), ah = Math.Max(1e-3f, y1 - y0);
         float qw = Math.Max(1e-3f, q.X1 - q.X0), qh = Math.Max(1e-3f, q.Y1 - q.Y0);
 
-        if (aw > qw * 1.6f || ah > qh * 1.6f)
+        if (aw > qw * 2.2f || ah > qh * 2.2f)
         {
             Logger.Log($"[Bounds] 检测到极端位移帧，改用分位包围盒 {qw:0}x{qh:0}（绝对框 {aw:0}x{ah:0}）");
+            LogBoundsDiagnosis(frames, q.X0, q.Y0, q.X1, q.Y1);
             return q;
         }
 
+        LogBoundsDiagnosis(frames, x0, y0, x1, y1);
         return (x0, y0, x1, y1);
+    }
+
+    /// <summary>
+    /// 包围盒自检：比较「最终框」和「每一帧的实际尺寸」。
+    /// 最大单帧明显大于最终框时，说明有帧注定被裁 —— 排查"渲染超出窗口"的第一手数据。
+    /// </summary>
+    private static void LogBoundsDiagnosis(
+        List<(float X0, float Y0, float X1, float Y1)> frames,
+        float x0, float y0, float x1, float y1)
+    {
+        float finalW = Math.Max(1e-3f, x1 - x0);
+        float finalH = Math.Max(1e-3f, y1 - y0);
+
+        float maxFW = 0f, maxFH = 0f;
+        foreach (var f in frames)
+        {
+            float w = f.X1 - f.X0, h = f.Y1 - f.Y0;
+            if (w > maxFW) maxFW = w;
+            if (h > maxFH) maxFH = h;
+        }
+
+        Logger.Log($"[Bounds] 采样 {frames.Count} 帧 → 最终框 {finalW:0}×{finalH:0}"
+                 + $"，最大单帧 {maxFW:0}×{maxFH:0}");
+
+        if (maxFW > finalW * 1.02f || maxFH > finalH * 1.02f)
+        {
+            Logger.Log($"[Bounds] ⚠ 存在比最终框更大的帧"
+                     + $"（宽 +{(maxFW / finalW - 1) * 100:0}%，高 +{(maxFH / finalH - 1) * 100:0}%）"
+                     + "，这些帧会被裁掉");
+        }
     }
 
     /// <summary>取四边各的 10% / 90% 分位，排除大幅位移的异常帧。</summary>

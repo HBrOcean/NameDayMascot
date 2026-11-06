@@ -64,6 +64,12 @@ public sealed class AppConfig
     /// <summary>定时随机动作的间隔（秒）。任何一次手动动作都会重新计时。</summary>
     public double AutoPlayIntervalSeconds { get; set; } = 20;
 
+    /// <summary>
+    /// 窗口随动作自适应：动作幅度变大时窗口跟着长大，动作结束慢慢缩回。
+    /// 关掉则窗口始终按静态包围盒（最省 CPU，也最稳）。
+    /// </summary>
+    public bool DynamicSize { get; set; } = true;
+
     // —— 按键映射 ——
     public List<KeyBinding> KeyBindings { get; set; } = new();
 

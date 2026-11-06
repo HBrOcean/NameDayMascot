@@ -482,6 +482,10 @@ public class SettingsWindow : Window
             v => _pet.SetBobbing(v), "角色会轻微上下漂浮，像在呼吸"));
         toggles.Children.Add(MakeCheck("水平翻转", _config.Flip,
             v => _pet.SetFlip(v), "左右镜像，让角色面朝另一边"));
+        toggles.Children.Add(MakeCheck("窗口随动作变化", _config.DynamicSize,
+            v => _pet.SetDynamicSize(v),
+            "动作幅度变大时窗口跟着长大，动作结束再慢慢缩回，不会把角色裁掉。"
+            + "关掉则窗口尺寸恒定（更省 CPU，拖动时也更稳）"));
         toggles.Children.Add(MakeCheck("允许点击触发动画", _config.Clickable,
             v => _config.Clickable = v, "单击角色时随机播放一个动作"));
         toggles.Children.Add(MakeCheck("动作锁定（播完再回待机）", _config.LockOnAction,
@@ -536,9 +540,9 @@ public class SettingsWindow : Window
         var anims = new List<string>(_pet.AnimationNames);
         var animPanel = new StackPanel { Spacing = 10 };
         animPanel.Children.Add(Row("待机动画", MakeAnimBox(_idleBox, anims, _config.IdleAnimation,
-            v => _config.IdleAnimation = v)));
+            v => _config.IdleAnimation = v, allowRandom: false)));
         animPanel.Children.Add(Row("点击动作", MakeAnimBox(_clickBox, anims, _config.ClickAnimation,
-            v => _config.ClickAnimation = v)));
+            v => _config.ClickAnimation = v, allowRandom: true)));
         panel.Children.Add(Group("动作", animPanel));
 
         return new ScrollViewer { Content = panel };
@@ -1051,8 +1055,8 @@ public class SettingsWindow : Window
         _suppressAnimChange = true;
         try
         {
-            RefreshAnimBox(_idleBox, anims, _config.IdleAnimation);
-            RefreshAnimBox(_clickBox, anims, _config.ClickAnimation);
+            RefreshAnimBox(_idleBox, anims, _config.IdleAnimation, allowRandom: false);
+            RefreshAnimBox(_clickBox, anims, _config.ClickAnimation, allowRandom: true);
         }
         finally
         {
@@ -1075,22 +1079,48 @@ public class SettingsWindow : Window
             _keyRows.Children.Add(BuildKeyRow(kb));
     }
 
-    private static void RefreshAnimBox(ComboBox box, List<string> anims, string current)
+    private static void RefreshAnimBox(ComboBox box, List<string> anims, string current, bool allowRandom = false)
     {
-        box.ItemsSource = anims;
-        int idx = anims.IndexOf(current);
-        box.SelectedIndex = idx >= 0 ? idx : (anims.Count > 0 ? 0 : -1);
+        var items = new List<string>();
+        if (allowRandom) items.Add(RandomOption);
+        items.AddRange(anims);
+
+        box.ItemsSource = items;
+        int idx = (allowRandom && string.IsNullOrEmpty(current))
+            ? 0
+            : items.IndexOf(current);
+        box.SelectedIndex = idx >= 0 ? idx : (items.Count > 0 ? 0 : -1);
     }
 
-    private Control MakeAnimBox(ComboBox box, List<string> anims, string current, Action<string> onChanged)
+    /// <summary>动画下拉里代表「不指定，交给程序随机挑」的伪选项。</summary>
+    private const string RandomOption = "(随机)";
+
+    private Control MakeAnimBox(ComboBox box, List<string> anims, string current, Action<string> onChanged,
+                                bool allowRandom = false)
     {
-        box.ItemsSource = anims;
-        int idx = anims.IndexOf(current);
-        box.SelectedIndex = idx >= 0 ? idx : (anims.Count > 0 ? 0 : -1);
+        var items = new List<string>();
+        if (allowRandom) items.Add(RandomOption);
+        items.AddRange(anims);
+
+        _suppressAnimChange = true;
+        try
+        {
+            box.ItemsSource = items;
+            int idx = (allowRandom && string.IsNullOrEmpty(current))
+                ? 0
+                : items.IndexOf(current);
+            box.SelectedIndex = idx >= 0 ? idx : (items.Count > 0 ? 0 : -1);
+        }
+        finally { _suppressAnimChange = false; }
+
         box.SelectionChanged += (_, __) =>
         {
             if (_suppressAnimChange) return;
-            if (box.SelectedItem is string s) onChanged(s);
+
+            // 选「(随机)」= 把配置写回空字符串
+            if (allowRandom && box.SelectedIndex == 0) { onChanged(""); return; }
+
+            if (box.SelectedItem is string s && s != RandomOption) onChanged(s);
         };
         return box;
     }

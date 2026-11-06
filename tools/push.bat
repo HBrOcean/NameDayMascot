@@ -6,6 +6,15 @@ cd /d "%~dp0.."
 set "REPO=https://github.com/HBrOcean/NameDayMascot.git"
 set "BRANCH=main"
 
+rem Optional: push.bat "your commit message"
+rem Without an argument a dated default is used, so consecutive pushes
+rem do not all look identical in the git history.
+set "MSG=%~1"
+if not "%MSG%"=="" goto HAVE_MSG
+set "MSG=Update NameDayMascot"
+for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd"') do set "MSG=Update NameDayMascot %%i"
+:HAVE_MSG
+
 echo ================================================
 echo   NameDayMascot  -^>  GitHub push
 echo ================================================
@@ -43,7 +52,7 @@ git add -A
 if errorlevel 1 goto FAIL
 
 echo [4/6] commit
-git commit -m "Update NameDayMascot"
+git commit -m "%MSG%"
 if errorlevel 1 echo         nothing to commit - skipped
 
 echo [5/6] sync with remote
@@ -70,7 +79,7 @@ if errorlevel 1 goto FAIL
 git add -A
 if errorlevel 1 goto FAIL
 
-git commit -m "Update NameDayMascot"
+git commit -m "%MSG%"
 if errorlevel 1 echo         nothing new to commit
 
 :DOPUSH

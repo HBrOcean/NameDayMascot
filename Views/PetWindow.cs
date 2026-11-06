@@ -45,6 +45,9 @@ public class PetWindow : Window
     /// <summary>定时随机动作。间隔可配，任何一次动作播放都会让它重新计时。</summary>
     private readonly DispatcherTimer _autoTimer = new();
 
+    /// <summary>窗口尺寸跟随动作幅度的轮询计时器（50ms，比渲染帧率低，减少 layout 次数）。</summary>
+    private readonly DispatcherTimer _sizeTimer = new();
+
     public event Action? SettingsRequested;
 
     public PetWindow(AppConfig config, SkeletonModel model)
@@ -56,6 +59,7 @@ public class PetWindow : Window
             Scale = config.Scale,
             Bobbing = config.Bobbing,
             Flip = config.Flip,
+            DynamicView = config.DynamicSize,
         };
 
         // 窗口图标（角色大头照）
@@ -73,7 +77,9 @@ public class PetWindow : Window
         _pet.ContextMenu = BuildContextMenu();
 
         ApplySize();
+        LogSize("启动");
         ApplyAutoPlay();
+        ApplyDynamicSize();
 
         if (config.HasSavedPosition)
         {
@@ -110,6 +116,19 @@ public class PetWindow : Window
         _pet.Height = s.Height;
         Width = s.Width;
         Height = s.Height;
+    }
+
+    /// <summary>
+    /// 把当前尺寸写进日志。只在启动和换皮肤时调 ——
+    /// 放进 ApplySize 会在拖缩放滑块时每 1% 刷一条，把日志撑爆。
+    /// </summary>
+    private void LogSize(string tag)
+    {
+        var b = _model.Bounds;
+        var s = _pet.DesiredPetSize;
+        Logger.Log($"[Size] {tag} 包围盒 {b.MaxX - b.MinX:0}×{b.MaxY - b.MinY:0}"
+                 + $"（x {b.MinX:0}..{b.MaxX:0}, y {b.MinY:0}..{b.MaxY:0}）"
+                 + $" → 窗口 {s.Width:0}×{s.Height:0}（缩放 {_config.Scale:P0}）");
     }
 
     /// <summary>把配置里的定时动作参数应用到计时器上。</summary>
@@ -152,7 +171,9 @@ public class PetWindow : Window
         // 上一个动作还没播完 → 这一轮跳过，等下一个周期
         if (_config.LockOnAction && _model.IsActionPlaying) return;
 
-        PlayRandomAction();
+        // 定时动作走「纯随机」：忽略「点击动作」配置。
+        // 它叫"定时随机动作"，如果跟着点击动作走，就等于每 20 秒重播同一个动作。
+        PlayRandomAction(useConfigured: false);
         // 成功播放时 PlayAction 内部已经把计时器归零（从这一刻起重新算 20 秒）；
         // 走到这里其实没播（比如被动作锁定拒了）就什么都不做，下一个周期照常到点。
     }
@@ -170,6 +191,83 @@ public class PetWindow : Window
     {
         _config.AutoPlayIntervalSeconds = Math.Clamp(seconds, 5, 180);
         ApplyAutoPlay();
+    }
+
+    /// <summary>应用「窗口随动作自适应」的开关状态。</summary>
+    private void ApplyDynamicSize()
+    {
+        _sizeTimer.Tick -= OnSizeTick;
+
+        if (_config.DynamicSize)
+        {
+            _pet.DynamicView = true;
+            _sizeTimer.Interval = TimeSpan.FromMilliseconds(33);
+            _sizeTimer.Tick += OnSizeTick;
+            _sizeTimer.Start();
+        }
+        else
+        {
+            _pet.DynamicView = false;
+            _pet.ResetView();          // 视框立刻回到静态包围盒
+            _sizeTimer.Stop();
+            ResizeKeepingAnchor(_pet.DesiredPetSize.Width, _pet.DesiredPetSize.Height);
+        }
+    }
+
+    /// <summary>设置面板调用：实时开关窗口自适应。</summary>
+    public void SetDynamicSize(bool on)
+    {
+        _config.DynamicSize = on;
+        ApplyDynamicSize();
+        Logger.Log($"[Size] 窗口随动作自适应：{(on ? "开启" : "关闭")}");
+    }
+
+    private void OnSizeTick(object? sender, EventArgs e)
+    {
+        if (_pressed) return;      // 拖动过程中改尺寸会和人抢，手感会抖
+        if (!IsVisible) return;
+
+        var s = _pet.DesiredPetSize;
+
+        // 小于 2 DIP 的变化不动窗口，避免一直在 resize
+        if (Math.Abs(s.Width - Width) < 2 && Math.Abs(s.Height - Height) < 2) return;
+
+        ResizeKeepingAnchor(s.Width, s.Height);
+    }
+
+    /// <summary>
+    /// 按新尺寸调整窗口，保持「窗口几何中心」在屏幕上不动。
+    ///
+    /// 为什么是中心而不是底部：角色是画在窗口几何中心的（canvas 平移到 pw/2, ph/2），
+    /// 窗口高度一变，锚在底部的写法会让角色整体上下移动 ΔH/2 —— 那就是"播放动作时偏移"。
+    /// 锚在中心，角色在屏幕上纹丝不动，只有看不见的窗口边界在涨缩。
+    /// </summary>
+    private void ResizeKeepingAnchor(double w, double h)
+    {
+        if (double.IsNaN(w) || double.IsNaN(h) || w < 1 || h < 1) return;
+        if (double.IsNaN(Width) || double.IsNaN(Height)) return;   // 首次布局完成前
+
+        double sc = RenderScaling > 0 ? RenderScaling : 1.0;
+
+        int oldPxW = (int)Math.Ceiling(Width * sc);
+        int oldPxH = (int)Math.Ceiling(Height * sc);
+        int newPxW = (int)Math.Ceiling(w * sc);
+        int newPxH = (int)Math.Ceiling(h * sc);
+        if (newPxW < 1 || newPxH < 1) return;
+
+        int anchorX = Position.X + oldPxW / 2;
+        int anchorY = Position.Y + oldPxH / 2;
+
+        Width = w;
+        Height = h;
+        _pet.Width = w;
+        _pet.Height = h;
+
+        Position = new PixelPoint(anchorX - newPxW / 2, anchorY - newPxH / 2);
+
+        // 这里刻意**不**调用 ClampToScreen：
+        // 视框收缩是渐进的，每 33ms clamp 一次等于把窗口位置一格一格往回推，
+        // 表现为"振动/拖影"。窗口边界可能短暂伸出屏幕，但它是透明的，看不见。
     }
 
     /// <summary>
@@ -301,8 +399,15 @@ public class PetWindow : Window
     {
         _config.Scale = scale;
         _pet.Scale = scale;
+
+        // 只用 ApplySize（只改尺寸，不动 Position）。
+        //
+        // 之前这里用 ResizeKeepingAnchor 保持窗口中心，紧跟着的 ClampToScreen
+        // 又会在放大后把窗口推回工作区 —— 两个动作互相抵消，表现出来就是"缩放时角色偏移"。
+        // 参考实现（SemmelweisMascot）用的就是这一句，行为稳定。
         ApplySize();
-        // 放大后窗口可能向右下顶出屏幕，拉回工作区
+
+        // 放大后可能向右下顶出屏幕，拉回工作区
         ClampToScreen();
     }
 
@@ -349,6 +454,7 @@ public class PetWindow : Window
             Scale = _config.Scale,
             Bobbing = _config.Bobbing,
             Flip = _config.Flip,
+            DynamicView = _config.DynamicSize,
         };
         _pet.PointerPressed += OnPointerPressed;
         _pet.PointerMoved += OnPointerMoved;
@@ -359,7 +465,11 @@ public class PetWindow : Window
 
         oldPet.Dispose();
         _pet.Running = IsVisible;   // 隐藏状态下切换皮肤时不应开始渲染
+
+        // 与 SetScale 同理：只改尺寸，不动 Position（参考实现的做法）
         ApplySize();
+        LogSize("换皮肤");
+
         PlayIntro();
     }
 
@@ -441,18 +551,23 @@ public class PetWindow : Window
     }
 
     /// <summary>
-    /// 单击触发的动作。
-    /// 原来这里只会播 ClickAnimation 或"列表第一个"，名字叫 Random 但压根不随机——
-    /// 于是连点十次看到十次同一个动作。现在从「可点动作池」里真随机，并避免连续同一个。
+    /// 播放一个动作。
+    ///
+    /// <paramref name="useConfigured"/> = true：先看「点击动作」配置，没配才随机（点击走这条）。
+    /// = false：完全忽略配置，纯随机（定时动作走这条 —— 它叫"定时随机"，就不该被点击动作绑住）。
     /// </summary>
-    public void PlayRandomAction()
+    public void PlayRandomAction(bool useConfigured = true)
     {
-        // 1) 用户明确指定了点击动作 → 尊重配置
-        string cfg = _config.ClickAnimation;
-        if (!string.IsNullOrEmpty(cfg) && _model.HasAnimation(cfg))
+        // 1) 用户明确指定了点击动作 → 尊重配置（仅点击场合）
+        if (useConfigured)
         {
-            PlayAction(cfg);
-            return;
+            string cfg = _config.ClickAnimation;
+            if (!string.IsNullOrEmpty(cfg) && _model.HasAnimation(cfg))
+            {
+                Logger.Log($"[Action] 使用固定的点击动作 {cfg}");
+                PlayAction(cfg);
+                return;
+            }
         }
 
         // 2) 没指定 → 从可点动作里随机挑（排除待机/入场/睡眠这类状态型动画）
@@ -480,6 +595,8 @@ public class PetWindow : Window
         }
 
         _lastRandom = pool[idx];
+        Logger.Log($"[Action] {(useConfigured ? "点击" : "定时")}随机选中 {_lastRandom}"
+                 + $"（候选 {pool.Count} 个：{string.Join("/", pool)}）");
         PlayAction(_lastRandom);
     }
 
@@ -620,6 +737,8 @@ public class PetWindow : Window
     {
         _autoTimer.Stop();
         _autoTimer.Tick -= OnAutoPlayTick;
+        _sizeTimer.Stop();
+        _sizeTimer.Tick -= OnSizeTick;
         SavePosition();
         ConfigStore.Save(_config);
         _pet.Dispose();
