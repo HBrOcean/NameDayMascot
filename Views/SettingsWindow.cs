@@ -491,7 +491,8 @@ public class SettingsWindow : Window
         toggles.Children.Add(MakeCheck("动作锁定（播完再回待机）", _config.LockOnAction,
             v => _config.LockOnAction = v, "动作必须完整播完才响应下一个请求，避免动画被打断"));
         toggles.Children.Add(MakeCheck("屏幕边缘吸附", _config.SnapToEdge,
-            v => _config.SnapToEdge = v, "拖动结束后自动贴到最近的屏幕边缘"));
+            v => _config.SnapToEdge = v,
+            "拖动结束后自动贴到最近的屏幕边缘（默认关闭）。关掉后窗口可以随意摆放，也可以拖到屏幕外"));
         toggles.Children.Add(MakeCheck("开机自启", _config.AutoStart, v =>
         {
             _config.AutoStart = v;

@@ -55,7 +55,7 @@ public sealed class AppConfig
     public string ClickAnimation { get; set; } = "";  // 点击动作（空=自动挑一个）
 
     // —— 行为 ——
-    public bool SnapToEdge { get; set; } = true;  // 屏幕边缘吸附
+    public bool SnapToEdge { get; set; } = false; // 屏幕边缘吸附（默认关闭，允许自由摆放／拖到屏幕外）
     public bool AutoStart { get; set; } = false;  // 开机自启
 
     /// <summary>定时随机动作：每隔一段时间自动播一个，让角色看起来是活的。</summary>

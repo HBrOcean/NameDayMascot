@@ -50,6 +50,14 @@ public sealed class PetRenderControl : Control, IDisposable
     public const double PadX = 0.25;
     public const double PadY = 0.12;
 
+    /// <summary>
+    /// 角色「脚底线」到窗口下沿的固定距离（DIP）。
+    ///
+    /// 必须是常数，不能写成窗口高度的比例 —— 窗口会随动作长高，
+    /// 用比例的话脚会跟着往下滑。用常数时，只要窗口底边不动，脚就绝对不动。
+    /// </summary>
+    public const double GroundInset = 12;
+
     /// <summary>桌宠缩放（DIP）。</summary>
     public double Scale { get; set; } = 1.0;
 
@@ -72,9 +80,9 @@ public sealed class PetRenderControl : Control, IDisposable
     public PetRenderControl(SkeletonModel model)
     {
         _model = model;
-        var b0 = model.Bounds;
-        _halfW = (b0.MaxX - b0.MinX) / 2f;
-        _halfH = (b0.MaxY - b0.MinY) / 2f;
+        // 初始视框与 ResetView 用同一套口径（锚点到最远边），
+        // 否则第一帧的窗口尺寸会和实际绘制的锚点对不上。
+        ResetView();
         // 30fps：桌面挂件足够顺，且比 60fps 省一半 CPU
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(33), DispatcherPriority.Render, OnFrame);
         _timer.Start();
@@ -104,7 +112,11 @@ public sealed class PetRenderControl : Control, IDisposable
         {
             double w = _halfW * 2.0 * Scale;
             double h = _halfH * 2.0 * Scale;
-            return new Size(Math.Max(1, w * (1 + PadX)), Math.Max(1, h * (1 + PadY)));
+
+            // 高度额外加上脚底的 GroundInset：角色从底边往上长，
+            // 那段留给“脚底离窗口下沿”的空白必须在窗口里，否则头顶会被裁。
+            return new Size(Math.Max(1, w * (1 + PadX)),
+                            Math.Max(1, h * (1 + PadY) + GroundInset));
         }
     }
 
@@ -114,8 +126,10 @@ public sealed class PetRenderControl : Control, IDisposable
         var top = TopLevel.GetTopLevel(this);
         if (top != null) _cachedScaling = top.RenderScaling > 0 ? top.RenderScaling : 1.0;
 
-        int pw = Math.Max(1, (int)(Bounds.Width * _cachedScaling));
-        int ph = Math.Max(1, (int)(Bounds.Height * _cachedScaling));
+        // 与 PetWindow 里 newPxW/newPxH 的算法保持一致（都是 Ceiling），
+        // 否则两处差 1px，连续 resize 时会看到 1px 级的抖动。
+        int pw = Math.Max(1, (int)Math.Ceiling(Bounds.Width * _cachedScaling));
+        int ph = Math.Max(1, (int)Math.Ceiling(Bounds.Height * _cachedScaling));
         if (pw < 2 || ph < 2) return; // 尚未完成布局
 
         if (_surface == null || _surfaceW != pw || _surfaceH != ph)
@@ -135,11 +149,13 @@ public sealed class PetRenderControl : Control, IDisposable
         // 视框跟随动作幅度（窗口尺寸由 PetWindow 根据 DesiredPetSize 同步调整）
         UpdateView();
 
-        // 变换原点永远用「静态包围盒中心」。视框围绕它对称扩张，
-        // 所以角色不会因为某一侧动作摆得更远而偏移。
-        var sb = _model.Bounds;
-        float cx = (sb.MinX + sb.MaxX) / 2f;
-        float cy = (sb.MinY + sb.MaxY) / 2f;
+        // 锚点 = 「身体中轴 + 脚底」，不再用包围盒中心。
+        //
+        // 包围盒中心会随头顶留白、披风、武器、脚下特效漂移，换皮肤时角色
+        // 就会上下左右跳。中轴 + 脚底是角色自带的特征，几套皮肤基本一致，
+        // 拿它当基准才能让不同皮肤站在同一个位置。
+        float ax = _model.AnchorX;
+        float ay = _model.AnchorY;
 
         canvas.Save();
 
@@ -147,7 +163,10 @@ public sealed class PetRenderControl : Control, IDisposable
         float bobPx = Bobbing
             ? (float)Math.Sin(_clock.Elapsed.TotalSeconds * 1.8) * 5f * (float)_cachedScaling
             : 0f;
-        canvas.Translate(pw / 2f, ph / 2f + bobPx);
+
+        // 脚底线钉在窗口下沿上方 GroundInset 处；水平钉在窗口正中
+        float groundPx = ph - (float)(GroundInset * _cachedScaling) + bobPx;
+        canvas.Translate(pw * 0.5f, groundPx);
 
         // 绘制比例只由「用户缩放 × 屏幕 DPI」决定，与窗口尺寸彻底解耦。
         //
@@ -158,7 +177,7 @@ public sealed class PetRenderControl : Control, IDisposable
 
         // 水平翻转：X 方向取负
         canvas.Scale(Flip ? -s : s, -s);
-        canvas.Translate(-cx, -cy);
+        canvas.Translate(-ax, -ay);
         _renderer.Draw(canvas, _model.Skeleton, _model);
         canvas.Restore();
         canvas.Flush();
@@ -199,10 +218,13 @@ public sealed class PetRenderControl : Control, IDisposable
     private void UpdateView()
     {
         var sb = _model.Bounds;
-        float cx = (sb.MinX + sb.MaxX) / 2f;
-        float cy = (sb.MinY + sb.MaxY) / 2f;
-        float statHalfW = Math.Max(1e-3f, (sb.MaxX - sb.MinX) / 2f);
-        float statHalfH = Math.Max(1e-3f, (sb.MaxY - sb.MinY) / 2f);
+        float ax = _model.AnchorX;
+        float ay = _model.AnchorY;
+
+        // 半宽/半高相对「锚点」算 —— 渲染时锚点被钉在窗口底部中心，
+        // 所以「锚点到最远边」的距离才是窗口真正需要留的空间。
+        float statHalfW = Math.Max(1e-3f, Math.Max(ax - sb.MinX, sb.MaxX - ax));
+        float statHalfH = Math.Max(1e-3f, Math.Max(ay - sb.MinY, sb.MaxY - ay));
 
         float targetW = statHalfW;
         float targetH = statHalfH;
@@ -211,8 +233,8 @@ public sealed class PetRenderControl : Control, IDisposable
         {
             // 当前帧相对中心需要多大的半宽/半高。
             // 取两侧的较大值 —— 对称扩张才不会让角色偏离窗口中心。
-            float needW = Math.Max(cx - fb.MinX, fb.MaxX - cx);
-            float needH = Math.Max(cy - fb.MinY, fb.MaxY - cy);
+            float needW = Math.Max(ax - fb.MinX, fb.MaxX - ax);
+            float needH = Math.Max(ay - fb.MinY, fb.MaxY - ay);
 
             if (needW > targetW) targetW = needW;
             if (needH > targetH) targetH = needH;
@@ -245,8 +267,8 @@ public sealed class PetRenderControl : Control, IDisposable
     public void ResetView()
     {
         var b = _model.Bounds;
-        _halfW = (b.MaxX - b.MinX) / 2f;
-        _halfH = (b.MaxY - b.MinY) / 2f;
+        _halfW = Math.Max(1e-3f, Math.Max(_model.AnchorX - b.MinX, b.MaxX - _model.AnchorX));
+        _halfH = Math.Max(1e-3f, Math.Max(_model.AnchorY - b.MinY, b.MaxY - _model.AnchorY));
     }
 
     /// <summary>

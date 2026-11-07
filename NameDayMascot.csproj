@@ -29,8 +29,9 @@
     <!-- CA1416: 平台兼容告警（穿透等本就是 Windows 专用）
          CS0649: 未赋值字段
          SKEXP0000: SkiaSharp 预览 API
-         CS8625: Spine/ 目录下第三方源码的 nullable 告警，不是我们的代码 -->
-    <NoWarn>$(NoWarn);CA1416;CS0649;SKEXP0000;CS8625</NoWarn>
+         CS86xx: Spine/ 目录下第三方源码（spine-csharp 4.2）的可空性告警，
+                 那个目录本来就不是为 nullable 写的，逐条改没意义 -->
+    <NoWarn>$(NoWarn);CA1416;CS0649;SKEXP0000;CS8600;CS8601;CS8602;CS8603;CS8604;CS8618;CS8625;CS8629</NoWarn>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
 
@@ -60,11 +61,12 @@
   </ItemGroup>
 
   <!-- Spine/ 是第三方源码（spine-csharp 4.2），原本不是为 nullable 写的。
-       整个目录关掉可空性分析，否则会产生上百条 CS86xx 警告。 -->
-  <ItemGroup>
-    <Compile Update="Spine\**\*.cs">
-      <Nullable>disable</Nullable>
-    </Compile>
-  </ItemGroup>
+       ⚠ 这里原先写的是：
+           <Compile Update="Spine\**\*.cs"><Nullable>disable</Nullable></Compile>
+       —— 这个写法无效：Nullable 是项目级编译属性，不是 per-file 元数据，
+       所以 Spine/ 目录仍然会产生 200+ 条 CS86xx 警告。
+       真正起作用的是这两条：
+         ① Spine/.editorconfig —— 按目录关闭可空性诊断（推荐，作用域精确）
+         ② 上面的 NoWarn —— 兜底，防止 IDE 不读 editorconfig 时又刷屏 -->
 
 </Project>

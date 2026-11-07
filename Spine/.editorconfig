@@ -1,0 +1,18 @@
+# Spine 运行时（spine-csharp）是第三方源码，按原样保留，不做可空性改造。
+# 这里只在本目录关闭可空性相关警告，避免 200+ 条噪音把真正的编译错误淹掉。
+# root = false 表示继续继承上层的 .editorconfig。
+root = false
+
+[*.cs]
+dotnet_diagnostic.CS8600.severity = none
+dotnet_diagnostic.CS8601.severity = none
+dotnet_diagnostic.CS8602.severity = none
+dotnet_diagnostic.CS8603.severity = none
+dotnet_diagnostic.CS8604.severity = none
+dotnet_diagnostic.CS8618.severity = none
+dotnet_diagnostic.CS8625.severity = none
+dotnet_diagnostic.CS8629.severity = none
+dotnet_diagnostic.CS0168.severity = none
+dotnet_diagnostic.CS0162.severity = none
+dotnet_diagnostic.CS0219.severity = none
+dotnet_diagnostic.CS0414.severity = none

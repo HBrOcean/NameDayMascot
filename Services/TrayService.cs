@@ -21,7 +21,8 @@ public sealed class TrayService : IDisposable
         Action<string> onPlayAction,
         IReadOnlyList<SkinEntry> skins,
         string currentSkinId,
-        Action<string> onSwitchSkin)
+        Action<string> onSwitchSkin,
+        Action onResetPosition)
     {
         _tray = new TrayIcon
         {
@@ -80,6 +81,12 @@ public sealed class TrayService : IDisposable
         }
 
         menu.Add(new NativeMenuItemSeparator());
+
+        // 窗口允许拖到屏幕外，所以这是唯一始终点得到的自救入口：
+        // 托盘图标固定在任务栏，不受窗口位置影响。
+        var miReset = new NativeMenuItem("重置位置（拉回主屏右下角）");
+        miReset.Command = new RelayCommand(onResetPosition);
+        menu.Add(miReset);
 
         var miSettings = new NativeMenuItem("设置…");
         miSettings.Command = new RelayCommand(onOpenSettings);

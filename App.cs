@@ -206,7 +206,8 @@ public class App : Application
             onPlayAction: name => _pet?.PlayAction(name),
             skins: SkinCatalog.All,
             currentSkinId: _config.Skin,
-            onSwitchSkin: SwitchSkin);
+            onSwitchSkin: SwitchSkin,
+            onResetPosition: () => _pet?.ResetPosition());
     }
 
     private void ShowSettings()

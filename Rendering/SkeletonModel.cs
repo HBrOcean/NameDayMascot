@@ -30,6 +30,18 @@ public sealed class SkeletonModel : IDisposable
     /// <summary>模型自然包围盒（Spine 本地坐标，未缩放），用于确定绘制基准。</summary>
     public (float MinX, float MinY, float MaxX, float MaxY) Bounds { get; }
 
+    /// <summary>
+    /// 角色锚点的 X：身体中轴（Spine 本地坐标）。
+    /// 取自「头部带」顶点的 x 中位数 —— 中位数天然忽略伸出去的武器/披风。
+    /// </summary>
+    public float AnchorX { get; private set; }
+
+    /// <summary>
+    /// 角色锚点的 Y：脚底（Spine 本地坐标，Y 向上）。
+    /// 取自待机动画全部顶点 y 的 2% 分位 —— 跳过偶尔出现的脚下光圈/剑尖插地。
+    /// </summary>
+    public float AnchorY { get; private set; }
+
     public SkeletonModel(string atlasPath, string skelPath, float defaultMix = 0.15f)
     {
         var loader = new SkiaTextureLoader(_images);
@@ -48,6 +60,10 @@ public sealed class SkeletonModel : IDisposable
         foreach (var a in Data.Animations) _animationNames.Add(a.Name);
 
         Bounds = ComputeBounds();
+
+        var anchor = ComputeAnchor();
+        AnchorX = anchor.X;
+        AnchorY = anchor.Y;
     }
 
     /// <summary>取某个区域对应的贴图（RegionAttachment / MeshAttachment 共用）。</summary>
@@ -187,6 +203,109 @@ public sealed class SkeletonModel : IDisposable
 
         LogBoundsDiagnosis(frames, x0, y0, x1, y1);
         return (x0, y0, x1, y1);
+    }
+
+    /// <summary>
+    /// 用「头顶 → 脚底」的轮廓算角色锚点，而不是用包围盒中心。
+    ///
+    /// 为什么不用包围盒中心：不同皮肤的框里，角色站的位置并不一样 ——
+    /// 有的头顶留白多，有的披风/长剑把框拉宽，还有的脚下带一圈特效。
+    /// 直接把包围盒中心对准窗口中心，换皮肤时脚会上下跳、中轴会左右跳。
+    ///
+    /// 做法：
+    ///   1. 采样待机动画（idle → posture → 第一个可用）若干帧，收集全部顶点；
+    ///   2. 脚底 = 所有 y 的 2% 分位（跳过零星的特效点，比直接取 min 稳）；
+    ///   3. 中轴 = 「头部带」（高度上方 20%）顶点的 x 中位数，
+    ///      中位数不会被单手持武器、披风拖偏；头部带点太少时退回全体中位数；
+    ///   4. 最后把中轴夹在轮廓的 15%~85% 之间，防止异常模型算出离谱的值。
+    /// </summary>
+    private (float X, float Y) ComputeAnchor()
+    {
+        Animation? anim = Data.FindAnimation("idle") ?? Data.FindAnimation("posture");
+
+        // 注意：这里不能写 Data.Animations[0]。
+        // spine-csharp 的 ExposedList<T> 在这个版本不提供公开索引器，会报 CS0021。
+        // 用枚举取第一个，既不依赖索引器也不依赖 Items 字段名。
+        if (anim == null)
+        {
+            foreach (var a in Data.Animations)
+            {
+                anim = a;
+                break;
+            }
+        }
+
+        var xs = new List<float>(2048);
+        var ys = new List<float>(2048);
+
+        void Collect()
+        {
+            foreach (var slot in Skeleton.DrawOrder)
+            {
+                if (slot.Attachment is not VertexAttachment va || va.WorldVerticesLength < 2) continue;
+
+                var verts = new float[va.WorldVerticesLength];
+                va.ComputeWorldVertices(slot, verts);
+                for (int i = 0; i + 1 < verts.Length; i += 2)
+                {
+                    xs.Add(verts[i]);
+                    ys.Add(verts[i + 1]);
+                }
+            }
+        }
+
+        if (anim != null)
+        {
+            float dur = anim.Duration <= 0 ? 0.1f : anim.Duration;
+            const int steps = 12;
+            for (int i = 0; i < steps; i++)
+            {
+                anim.Apply(Skeleton, 0f, dur * i / steps, false, null, 1f, MixBlend.Setup, MixDirection.In);
+                Skeleton.UpdateWorldTransform(Skeleton.Physics.None);
+                Collect();
+            }
+        }
+        else
+        {
+            Skeleton.SetToSetupPose();
+            Skeleton.UpdateWorldTransform(Skeleton.Physics.None);
+            Collect();
+        }
+
+        // 恢复干净状态
+        Skeleton.SetToSetupPose();
+        State.Apply(Skeleton);
+        Skeleton.UpdateWorldTransform(Skeleton.Physics.None);
+
+        if (xs.Count == 0)
+            return ((Bounds.MinX + Bounds.MaxX) / 2f, Bounds.MinY);
+
+        var sortedY = new List<float>(ys);
+        sortedY.Sort();
+        int loIdx = Math.Clamp((int)(sortedY.Count * 0.02f), 0, sortedY.Count - 1);
+        int hiIdx = Math.Clamp((int)(sortedY.Count * 0.98f), 0, sortedY.Count - 1);
+        float groundY = sortedY[loIdx];
+        float topY = sortedY[hiIdx];
+        float bodyH = Math.Max(1e-3f, topY - groundY);
+
+        // 头部带：上方 20%
+        float headCut = topY - bodyH * 0.20f;
+        var headXs = new List<float>(256);
+        for (int i = 0; i < ys.Count; i++)
+            if (ys[i] >= headCut) headXs.Add(xs[i]);
+
+        var pick = headXs.Count >= 8 ? headXs : xs;
+        pick.Sort();
+        float axisX = pick[pick.Count / 2];
+
+        float spanX = Math.Max(1e-3f, Bounds.MaxX - Bounds.MinX);
+        axisX = Math.Clamp(axisX, Bounds.MinX + spanX * 0.15f, Bounds.MaxX - spanX * 0.15f);
+
+        Logger.Log($"[Anchor] 中轴 x={axisX:0.0} 脚底 y={groundY:0.0} "
+                   + $"（头顶 y={topY:0.0} 身高 {bodyH:0.0}；"
+                   + $"包围盒中心 x={(Bounds.MinX + Bounds.MaxX) / 2f:0.0} y={(Bounds.MinY + Bounds.MaxY) / 2f:0.0}）");
+
+        return (axisX, groundY);
     }
 
     /// <summary>
